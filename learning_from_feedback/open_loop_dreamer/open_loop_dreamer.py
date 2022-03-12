@@ -36,6 +36,7 @@ DEFAULT_CONFIG = with_common_config({
     "lambda": 0.95,
     # Training iterations per data collection from real env
     "dreamer_train_iters": 100,
+    "training_steps_per_env_step": 0.2,
     # Horizon for Enviornment (1000 for Mujoco/DMC)
     "horizon": 1000,
     # Number of episodes to sample for Loss Calculation
@@ -74,8 +75,11 @@ DEFAULT_CONFIG = with_common_config({
     "dreamer_model": {
         "custom_model": OpenLoopDreamerModel,
         "memory_length": None,
+        "horizon": 8,
         # General Network Parameters
         "state_size": 256,
+        "stoch_size": 32,
+        "deter_size": 256,
         "hidden_size": 256,
         # Discount
         "discount": 0.99,
@@ -144,7 +148,7 @@ def execution_plan(workers, config):
                                    length=config['batch_length'],
                                    memory_length=config['dreamer_model']['memory_length'],
                                    prefill_timesteps=config['prefill_timesteps'],
-                                   training_steps_per_env_steps=0.2)
+                                   training_steps_per_env_steps=config['training_steps_per_env_step'])
     # This sub-flow sends experiences to the learner.
     enqueue_op = train_batches.for_each(episode_buffer)
 

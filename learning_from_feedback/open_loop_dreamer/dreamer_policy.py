@@ -33,12 +33,18 @@ def compute_dreamer_loss(policy,
             model (TorchModelV2): DreamerModel, encompassing all other models
             log (bool): If log, log absolute weight mean
         """
+    # model.train()
+    # if not hasattr(policy, 'jit_loss_function'):
+    #     policy.jit_loss_function = torch.jit.trace(model, (obs, action, reward, valid, done), strict=False)
     with policy.model_observe_timer:
         loss, info_dict = model.loss(obs, action, reward, valid, done)
+        # loss, info_dict = policy.jit_loss_function(obs, action, reward, valid, done)
     if log:
         weight_magnitudes = torch.stack([p.abs().mean() for p in model.parameters()])
         info_dict['mean_abs_weight'] = weight_magnitudes.mean()
         info_dict['max_abs_weight'] = weight_magnitudes.max()
+        if hasattr(model, "logs"):
+            info_dict.update(model.logs(obs, action, reward))
     return loss, info_dict
 
 
@@ -51,11 +57,19 @@ def dreamer_loss(policy, model, dist_class, train_batch):
     if len(train_batch['obs'].shape) == 2:
         # RLLib tests the loss function automatically before training with fake data
         # But the batch dimensions are invalid. This is fixed here
-        train_batch['obs'] = train_batch['obs'].unsqueeze(1).repeat(1, 32, 1)
-        train_batch["actions"] = train_batch["actions"].unsqueeze(1).repeat(1, 32, 1)
-        train_batch["rewards"] = train_batch["rewards"].unsqueeze(1).repeat(1, 32)
-        train_batch["valid"] = train_batch["valid"].unsqueeze(1).repeat(1, 32)
-        train_batch["dones"] = train_batch["dones"].unsqueeze(1).repeat(1, 32)
+        # train_batch['obs'] = train_batch['obs'].unsqueeze(1).repeat(1, 32, 1)
+        # train_batch["actions"] = train_batch["actions"].unsqueeze(1).repeat(1, 32, 1)
+        # train_batch["rewards"] = train_batch["rewards"].unsqueeze(1).repeat(1, 32)
+        # train_batch["valid"] = train_batch["valid"].unsqueeze(1).repeat(1, 32)
+        # train_batch["dones"] = train_batch["dones"].unsqueeze(1).repeat(1, 32)
+        T, B = policy.config['batch_length'], policy.config['batch_size']
+        device = train_batch['obs'].device
+
+        train_batch['obs'] = torch.zeros(B, T, train_batch['obs'].shape[-1], device=device)
+        train_batch["actions"] = torch.zeros(B, T, train_batch['actions'].shape[-1], device=device)
+        train_batch["rewards"] = torch.zeros(B, T, device=device)
+        train_batch["valid"] = torch.zeros(B, T, device=device)
+        train_batch["dones"] = torch.zeros(B, T, device=device)
 
     loss, policy.stats_dict = compute_dreamer_loss(
         policy,
@@ -104,14 +118,12 @@ def action_sampler_fn(policy, model, input_dict, state, explore, timestep):
     logp = torch.tensor([0.0]) # necessary for RLLib for unknown reason
 
     # Weird RLLib Handling, this happens when env rests
-    if len(state[0].shape) != model.get_state_dims():
+    if len(state) == 0 or len(state[0].shape) != model.get_state_dims():
         print('ressetting state')
         # Very hacky, but works on all envs
         state = model.get_initial_state(batch_size=obs.shape[0], sequence_length=policy.config['batch_length'])
 
     action, state, _ = model.policy(obs, state, explore)
-    if explore:
-        action = torch.distributions.Normal(action, policy.config["explore_noise"]).sample()
 
     policy.global_timestep += policy.config["action_repeat"]
     policy.steps_sampled += policy.config['action_repeat']

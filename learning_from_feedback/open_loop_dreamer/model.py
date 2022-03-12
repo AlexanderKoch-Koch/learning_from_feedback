@@ -76,6 +76,8 @@ class OpenLoopDreamerModel(TorchModelV2, nn.Module):
         policy_input = pad(policy_input, T, dim=0)
         state = self.policy_transformer(self.policy_positional_encoding(policy_input))
         action = self.squash_action(state[S:, :, :self.action_size])[0]
+        if explore:
+            action = torch.distributions.Normal(action, 0.3).sample()
 
         state = [observations.transpose(0, 1),
                  torch.cat((prev_actions, action.unsqueeze(0)), dim=0)[1:].transpose(0, 1)]
