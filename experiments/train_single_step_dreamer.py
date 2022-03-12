@@ -1,5 +1,5 @@
 from ray import tune
-from training import train
+from learning_from_feedback.training import train
 from learning_from_feedback.single_step_dreamer.dreamer import DREAMERTrainer
 from learning_from_feedback.envs.sequence_guessing_env import SequenceGuessingEnv
 from ray.rllib.models import ModelCatalog
