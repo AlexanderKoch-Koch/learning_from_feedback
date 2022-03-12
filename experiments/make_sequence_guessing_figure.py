@@ -10,7 +10,7 @@ def plot_with_std(x, y, label, color):
     std = np.std(y, axis=0)
     mean = np.mean(y, axis=0)
     plt.plot(x, mean, label=label, color=color)
-    plt.fill_between(x, mean - 0.5 * std, mean + 0.5 * std, color=color, alpha=0.2)
+    plt.fill_between(x, mean - std, mean + std, color=color, alpha=0.2)
 
 path = Path(__file__)
 with_feedback_dir = path.parent / 'logs' / 'sequence_guessing' / 'sequence_guessing_with_feedback' / 'Dreamer_2022-02-21_07-52-25'
