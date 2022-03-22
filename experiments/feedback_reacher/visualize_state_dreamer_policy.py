@@ -3,14 +3,13 @@ import argparse
 from ray import tune
 from learning_from_feedback.open_loop_dreamer.open_loop_dreamer import OpenLoopDreamerTrainer
 import gym
-from learning_from_feedback.envs.reacher_2d import Reacher2D
+from learning_from_feedback.envs.feedback_reacher import FeedbackReacher
 from learning_from_feedback.open_loop_dreamer.state_dreamer_model import StateDreamerModel
 
-tune.register_env('reacher2d', lambda kwargs: Reacher2D(max_steps_per_episode=100, action_repeat=2))
-
+tune.register_env('feedback_reacher', lambda kwargs: FeedbackReacher(action_repeat=8))
 
 config = dict(
-    env='reacher2d',
+    env='feedback_reacher',
     framework='torch',
     num_gpus=1,
     prefill_timesteps=2000,
@@ -54,7 +53,7 @@ while True:
         # action = trainer.compute_action(obs, explore=False)
         # action = env.action_space.sample() * 0
         action, state, _ = trainer.compute_single_action(obs, state, explore=False)
-        print(f'action {action}  took {time.time() - s}')
+        # print(f'action {action}  took {time.time() - s}')
         s = time.time()
         obs, reward, done, info = env.step(action)
         # if not args.headless:
@@ -62,6 +61,7 @@ while True:
         # print(f'step took {time.time() - s}')
         return_ += reward
         env.render()
+        time.sleep(env.action_repeat * 0.01)
 
     returns_.append(return_)
     print(f'avg return: {sum(returns_)/len(returns_)}return_: {return_}')

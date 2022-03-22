@@ -4,10 +4,9 @@ import time
 import os
 from gym import utils
 from gym.envs.mujoco import mujoco_env
-import mujoco_py
 
 
-class Reacher2D(mujoco_env.MujocoEnv, utils.EzPickle):
+class FeedbackReacher(mujoco_env.MujocoEnv, utils.EzPickle):
     def __init__(self, max_steps_per_episode=100, img_size=16, action_repeat=1):
         self.action_repeat = action_repeat
         self.max_steps_per_episode = max_steps_per_episode
@@ -17,12 +16,11 @@ class Reacher2D(mujoco_env.MujocoEnv, utils.EzPickle):
         utils.EzPickle.__init__(self)
         model_path = os.path.join(os.path.dirname(__file__), "mujoco_assets/reacher_2d.xml")
         mujoco_env.MujocoEnv.__init__(self, model_path, self.action_repeat)
-        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(7,))
+        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(8,))
 
     def step(self, a):
         reward_dist = 0
         reward_ctrl = 0
-        # self.do_simulation(a, 2)
 
         for _ in range(self.action_repeat):
             self.do_simulation(a, 1)
@@ -39,7 +37,13 @@ class Reacher2D(mujoco_env.MujocoEnv, utils.EzPickle):
         info = dict(reward_dist=reward_dist/self.action_repeat,
                     reward_ctrl=reward_ctrl/self.action_repeat,
                     reward_dist_episode_sum=self.reward_dist_episode_sum)
-        return ob, 1 * reward/self.action_repeat, done, info
+        reward = 0
+        if self.step_in_episode > self.max_steps_per_episode:
+            if self.get_body_com('fingertip')[0] < -0.14:
+                reward = 1
+
+
+        return ob, reward, done, info
 
     def viewer_setup(self):
         self.viewer.cam.distance = 0.9
@@ -69,16 +73,16 @@ class Reacher2D(mujoco_env.MujocoEnv, utils.EzPickle):
         return np.concatenate([
             np.cos(theta),
             np.sin(theta),
-        #     self.sim.data.qpos.flat[2:],
-        #     self.sim.data.qvel.flat[:2],
+            [self.step_in_episode/self.max_steps_per_episode],
+            #     self.sim.data.qpos.flat[2:],
+            #     self.sim.data.qvel.flat[:2],
             self.get_body_com("fingertip") - self.get_body_com("target")
         ])
         # return self.render(mode='rgb_array', width=self.img_size, height=self.img_size) / 255
 
-
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-    env = Reacher2D()
+    env = FeedbackReacher()
     while True:
         done = False
         reward_sum = 0
@@ -88,7 +92,7 @@ if __name__ == '__main__':
             action = env.action_space.sample()
             # action = np.ones(2)
             obs, reward, done, info = env.step(action)
-            env.render()
+            # env.render()
             # plt.imshow(env.render(mode='rgb_array', width=16, height=16))
             # plt.imshow(obs)
             # plt.imshow(env.render(mode='rgb_array', width=64, height=64))

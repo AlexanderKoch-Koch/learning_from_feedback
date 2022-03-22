@@ -35,7 +35,7 @@ class EpisodeBuffer(object):
         self.batch_size = batch_size
         self.prefill_timesteps = prefill_timesteps
         self.training_steps_per_env_steps = training_steps_per_env_steps
-        self.memory_length = memory_length or length
+        self.memory_length = memory_length or 1
 
     def __call__(self, samples):
         """
@@ -98,7 +98,7 @@ class EpisodeBuffer(object):
         batch_rew = np.concatenate((np.zeros((self.length - 1, *batch_rew.shape[1:])), batch_rew), axis=0)
         valid = np.ones_like(batch_rew)
         done = np.zeros_like(batch_rew)
-        valid[:self.length - 1] = 0
+        # valid[:self.length - 1] = 0
         done[-1] = 1
 
         new_batch = {
@@ -124,6 +124,7 @@ class EpisodeBuffer(object):
             # if episode.count < self.length:
             #     continue
             available = episode.count - self.length
+            assert available >= 0, f"episode length is just {episode.count} but training batch length is set to {self.length}"
             index = np.random.randint(-self.memory_length + 1, available + 1)
             # index = np.random.randint(0, available + 1)
             valid_steps = episode[max(0, index):index + self.length]

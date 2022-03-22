@@ -2,13 +2,14 @@ from ray import tune
 from learning_from_feedback.training import train
 from learning_from_feedback.open_loop_dreamer.open_loop_dreamer import OpenLoopDreamerTrainer
 from learning_from_feedback.envs.reacher_2d import Reacher2D
+from learning_from_feedback.envs.feedback_reacher import FeedbackReacher
 from learning_from_feedback.open_loop_dreamer.state_dreamer_model import StateDreamerModel
 
-tune.register_env('reacher2d', lambda kwargs: Reacher2D(action_repeat=4))
+tune.register_env('feedback_reacher', lambda kwargs: FeedbackReacher(action_repeat=8))
 
 
 config = dict(
-    env='reacher2d',
+    env='feedback_reacher',
     framework='torch',
     num_workers=2,
     num_gpus=1,
@@ -16,7 +17,7 @@ config = dict(
     dreamer_train_iters=1000,
     training_steps_per_env_step=0.2,
     batch_size=64,
-    batch_length=20,
+    batch_length=14,
     explore_noise=0.3,
     td_model_lr=3e-4,
     min_iter_time_s=5,
@@ -32,7 +33,7 @@ config = dict(
         stoch_size=32,
         deter_size=256,
         discount=0.99,
-        horizon=8,
+        horizon=14,
 ),
 )
 train(OpenLoopDreamerTrainer,

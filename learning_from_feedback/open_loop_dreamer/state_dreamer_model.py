@@ -42,6 +42,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
 
         self.device = (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
         self.reward_model = StochMlpModel(state_size, [hidden_size, ], 1, fixed_std=1)
+        self.termination_pred_model = StochMlpModel(state_size, [hidden_size], 1, dist='binary')
         self.prior_model = StochMlpModel(deter_size, [hidden_size], stoch_size)
         self.action_model = ActionModel(deter_size + stoch_size, action_size, 2, hidden_size, action_space)
 
@@ -67,7 +68,9 @@ class StateDreamerModel(nn.Module, TorchModelV2):
             action = self.action_model(state).mode
 
         x = self.img1(torch.cat([stoch_state, action], dim=-1))
-        gru_state = self.cell(x, gru_state)
+        # gru_state = self.cell(x, gru_state)
+        _, gru_state = self.gru(x.unsqueeze(0), gru_state.unsqueeze(0))
+        gru_state = gru_state[0]
 
         state = [stoch_state, gru_state, action]
         return action, state, None
@@ -80,63 +83,84 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         gru_states = []
         kl_losses = []
         mean_kl_divs = []
-        # post_dists = self.post_model(observations)
-        # post_samples = post_dists.rsample()
+        post_dists = self.post_model(observations)
+        stoch_states = post_dists.rsample()
 
-        # gru_inputs = self.img1(torch.cat((post_samples, actions), dim=-1))
-        # gru_states, _ = self.gru(gru_inputs, gru_state.unsqueeze(0))
+        gru_inputs = self.img1(torch.cat((stoch_states, actions), dim=-1))
+        # gru_inputs = self.img1(torch.cat((torch.cat((stoch_state.unsqueeze(0), stoch_states), dim=0)[:-1], actions), dim=-1))
+        gru_states, _ = self.gru(gru_inputs, gru_state.unsqueeze(0))
 
-        for t in range(T):
-            post_dist = self.post_model(observations[t])
-            x = self.img1(torch.cat([stoch_state, actions[t]], dim=-1))
-            gru_state = self.cell(x, gru_state)
-            prior_dist = self.prior_model(gru_state)
-            # prior = prior_dist.rsample()
-            stoch_state = post_dist.rsample()
+        # for t in range(T):
+        #     post_dist = self.post_model(observations[t])
+        #     x = self.img1(torch.cat([stoch_state, actions[t]], dim=-1))
+        #     # gru_state = self.cell(x, gru_state)
+        #     _, gru_state = self.gru(x.unsqueeze(0), gru_state.unsqueeze(0))
+        #     gru_state = gru_state[0]
+        #     prior_dist = self.prior_model(gru_state)
+        #     # prior = prior_dist.rsample()
+        #     stoch_state = post_dist.rsample()
+        #
+        #     # post_dist = self.post_model(torch.cat((gru_state, observations[t]), dim=-1))
+        #     # stoch_state = post_dist.rsample()
+        #     # post_dist = post_dists[t]
+        #     # stoch_state = post_samples[t]
+        #
+        #     stoch_states.append(stoch_state)
+        #     gru_states.append(gru_state)
+        #     kl_losses.append(valid[t] * self.kl_loss(prior_dist, post_dist))
+        #     # kl_losses.append(valid[t] * td.kl_divergence(post_dist, prior_dist).sum(dim=-1).mean())
+        #     mean_kl_divs.append(valid[t] * td.kl_divergence(post_dist, prior_dist).sum(dim=-1))
 
-            # post_dist = self.post_model(torch.cat((gru_state, observations[t]), dim=-1))
-            # stoch_state = post_dist.rsample()
-            # post_dist = post_dists[t]
-            # stoch_state = post_samples[t]
+        gru_states = torch.cat((gru_state.unsqueeze(0), gru_states), dim=0)[:-1]
+        prior_dists = self.prior_model(gru_states)
 
-            stoch_states.append(stoch_state)
-            gru_states.append(gru_state)
-            kl_losses.append(valid[t] * self.kl_loss(prior_dist, post_dist))
-            # kl_losses.append(valid[t] * td.kl_divergence(post_dist, prior_dist).sum(dim=-1).mean())
-            mean_kl_divs.append(valid[t] * td.kl_divergence(post_dist, prior_dist).sum(dim=-1))
+        # for t in range(T):
+        #     kl_losses.append(valid[t] * self.kl_loss(td.Normal(prior_dists.mean[t], prior_dists.stddev[t]),
+        #                                              td.Normal(post_dists.mean[t], post_dists.stddev[t])))
+        # kl_loss = torch.stack(kl_losses[2:]).mean()
 
-        stoch_states = torch.stack(stoch_states)
-        gru_states = torch.stack(gru_states)
-        # gru_states = torch.cat((gru_state.unsqueeze(0), gru_states), dim=0)[:-1]
-        # prior_dists = self.prior_model(gru_states)
-        # kl_loss = self.kl_loss(prior_dists, post_dists)[1:].mean()
-        # mean_kl_div = td.kl_divergence(post_dists, prior_dists)[1:].sum(dim=-1).mean()
-        # states = torch.cat((post_samples, gru_states), dim=-1)
+        kl_loss = self.kl_loss(prior_dists, post_dists)[2:].mean()
+        mean_kl_div = td.kl_divergence(post_dists, prior_dists)[2:].sum(dim=-1).mean()
         states = torch.cat((stoch_states, gru_states), dim=-1)
-        kl_loss = torch.stack(kl_losses[2:]).mean()
-        mean_kl_div = torch.stack(mean_kl_divs).mean()
+
+        # stoch_states = torch.stack(stoch_states)
+        # gru_states = torch.stack(gru_states)
+        # states = torch.cat((stoch_states, gru_states), dim=-1)
+        # kl_loss = torch.stack(kl_losses[2:]).mean()
+        # mean_kl_div = torch.stack(mean_kl_divs).mean()
         # kl_loss = torch.clamp(torch.stack(kl_losses[2:]), min=0.5).mean()
         obs_reconstruction = self.decoder(states)
         obs_loss = -obs_reconstruction.log_prob(observations).mean()
         reward_pred = self.reward_model(states)
         reward_loss = -torch.mean(valid * reward_pred.log_prob(rewards))
-        model_loss = 1 * kl_loss + 1 * obs_loss + reward_loss
+        termination_pred = self.termination_pred_model(states)
+        termination_loss = -torch.mean(valid * termination_pred.log_prob(done))
+        model_loss = 1 * kl_loss + 1 * obs_loss + reward_loss + termination_loss
 
         stoch_state = stoch_states.reshape(T * B, self.stoch_size)
         gru_state = gru_states.reshape(T * B, self.deter_size)
+        # samples_indexes = torch.randint(low=0, high=stoch_state.shape[0], size=(B,))
+        # gru_state = gru_state[samples_indexes]
+        # stoch_state = stoch_state[samples_indexes]
         with FreezeParameters(list(self.get_model_weights())):
             imagined_states = self.dream(stoch_state.detach(), gru_state.detach(), self.horizon)
             reward_pred = self.reward_model(imagined_states).mean
-        discount = torch.cumprod(self.discount * torch.ones(self.horizon, device=self.device), dim=0).unsqueeze(-1)
+            termination_pred = self.termination_pred_model(imagined_states).mean
+        # discount = torch.cumprod(self.discount * torch.ones(self.horizon, device=self.device), dim=0).unsqueeze(-1)
+        termination_pred = torch.cat((torch.zeros_like(termination_pred[0:1]), termination_pred[:-1]), dim=0)
+        discount = torch.cumprod(1 - termination_pred, dim=0)
         policy_loss = -torch.mean(discount * reward_pred)
 
         info = dict(
             reward_loss=reward_loss,
+            termination_pred_loss=termination_loss,
+            avg_termination_pred=termination_pred.mean(),
             kl_loss=kl_loss,
             reconstruction_loss=obs_loss,
             mean_kl_div=mean_kl_div,
-            mean_dreamed_reward=reward_pred.mean(),
+            mean_dreamed_reward=(discount * reward_pred).mean(),
         )
+        print(f'mean valid {valid.mean()} reward loss {reward_loss}')
         return model_loss + policy_loss, info
 
     def dream(self, stoch_state, gru_state, horizon: int, actions=None) -> TensorType:
@@ -149,9 +173,9 @@ class StateDreamerModel(nn.Module, TorchModelV2):
             else:
                 action = actions[t]
             x = self.img1(torch.cat([stoch_state, action], dim=-1))
-            gru_state = self.cell(x, gru_state)
-            # gru_state, _ = self.gru(x.unsqueeze(0), gru_state.unsqueeze(0))
-            # gru_state = gru_state[0] # remove time dim
+            # gru_state = self.cell(x, gru_state)
+            gru_state, _ = self.gru(x.unsqueeze(0), gru_state.unsqueeze(0))
+            gru_state = gru_state[0] # remove time dim
             stoch_state = self.prior_model(gru_state).rsample()
             imagined_states.append(torch.cat((stoch_state, gru_state), dim=-1))
 
@@ -176,6 +200,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
                + list(self.img1.parameters()) \
                + list(self.cell.parameters()) \
                 + list(self.gru.parameters()) \
+                + list(self.termination_pred_model.parameters()) \
                + list(self.reward_model.parameters())
 
     def get_actor_weights(self):
@@ -187,7 +212,8 @@ class StateDreamerModel(nn.Module, TorchModelV2):
 
         prior_kl = td.kl_divergence(post_dist_detached, prior_dist).sum(dim=-1)
         post_kl = td.kl_divergence(post_dist, prior_dist_detached).sum(dim=-1)
-        kl_loss = 1 * prior_kl + 0.2 * post_kl
+        # kl_loss = 1 * prior_kl + 0.2 * post_kl
+        kl_loss = 1 * prior_kl + 0.05 * post_kl
 
         # div = torch.mean(torch.distributions.kl_divergence(target_dist, prior_dist).sum(dim=-1))
         # kl_loss = torch.clamp(div.mean(), min=1.5)
@@ -198,29 +224,34 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         stoch_state, gru_state, _ = self.get_initial_state(batch_size=B)
         states = []
         num_conditioning_obs = 4
-        for t in range(num_conditioning_obs):
-            post_dist = self.post_model(obs[t])
-            # stoch_state = post_dist.rsample()
-            x = self.img1(torch.cat([stoch_state, actions[t]], dim=-1))
-            gru_state = self.cell(x, gru_state)
-            # prior_dist = self.prior_model(gru_state)
-            # prior = prior_dist.rsample()
-            # post_dist = self.post_model(torch.cat((gru_state, obs[t]), dim=-1))
-            stoch_state = post_dist.rsample()
-            states.append(torch.cat((stoch_state, gru_state), dim=-1))
+        # for t in range(num_conditioning_obs):
+        #     post_dist = self.post_model(obs[t])
+        #     # stoch_state = post_dist.rsample()
+        #     x = self.img1(torch.cat([stoch_state, actions[t]], dim=-1))
+        #     _, gru_state = self.gru(x.unsqueeze(0), gru_state.unsqueeze(0))
+        #     gru_state = gru_state[0]
+        #     # gru_state = self.cell(x, gru_state)
+        #     # prior_dist = self.prior_model(gru_state)
+        #     # prior = prior_dist.rsample()
+        #     # post_dist = self.post_model(torch.cat((gru_state, obs[t]), dim=-1))
+        #     stoch_state = post_dist.rsample()
+        #     states.append(torch.cat((stoch_state, gru_state), dim=-1))
 
-        # post_dists = self.post_model(obs[:num_conditioning_obs])
-        # post_samples = post_dists.rsample()
-        # gru_inputs = self.img1(torch.cat((post_samples, actions[:num_conditioning_obs]), dim=-1))
-        # gru_states, gru_state = self.gru(gru_inputs, gru_state.unsqueeze(0))
+        post_dists = self.post_model(obs[:num_conditioning_obs])
+        stoch_states = post_dists.rsample()
+        # gru_inputs = self.img1(torch.cat((torch.cat((stoch_state.unsqueeze(0), stoch_states), dim=0)[:-1], actions[:num_conditioning_obs]), dim=-1))
+        gru_inputs = self.img1(torch.cat((stoch_states, actions[:num_conditioning_obs]), dim=-1))
+        gru_states, gru_state = self.gru(gru_inputs, gru_state.unsqueeze(0))
+        gru_state = gru_state[0]
+        states = torch.cat((stoch_states, gru_states), dim=-1)
 
         # gru_states = torch.cat((gru_state, gru_states), dim=0)[:-1]
         # states = torch.cat((post_samples, gru_states), dim=-1)
-        states = torch.stack(states)
 
+        # states = torch.stack(states)
         obs_reconstruction = self.decoder(states).mean
-        # imagined_states = self.dream(post_samples[-1], gru_states[-1], horizon=self.horizon, actions=actions[num_conditioning_obs:])
-        imagined_states = self.dream(stoch_state, gru_state, horizon=self.horizon, actions=actions[num_conditioning_obs:])
+        # imagined_states = self.dream(stoch_states[-1], gru_states[-1], horizon=self.horizon, actions=actions[num_conditioning_obs:])
+        imagined_states = self.dream(stoch_state, gru_state, horizon=T-num_conditioning_obs, actions=actions[num_conditioning_obs:])
         obs_prediction = self.decoder(imagined_states).mean
         reward_prediction = self.reward_model(imagined_states).mean
 

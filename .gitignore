@@ -131,3 +131,5 @@ dmypy.json
 #logs/
 nohup.out
 *.npy
+logs
+MUJOCO_LOG.TXT
