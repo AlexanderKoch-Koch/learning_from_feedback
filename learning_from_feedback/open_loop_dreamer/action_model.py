@@ -79,7 +79,7 @@ class ActionModel(nn.Module):
         x = self.model(x)
         if self.dist == 'normal':
             mean, std = torch.chunk(x, 2, dim=-1)
-            mean = self.mean_scale * torch.tanh(mean / self.mean_scale)
+            # mean = self.mean_scale * torch.tanh(mean / self.mean_scale)
             std = self.softplus(std) + self.min_std
             print(f'action mean {mean} std {std}')
             dist = td.Normal(mean, std)
@@ -96,7 +96,8 @@ class ActionModel(nn.Module):
             dist = td.transformed_distribution.TransformedDistribution(
                 dist, transforms)
             dist = td.Independent(dist, 1)
-            dist.mode = self.action_scale * torch.tanh(mean) + self.action_loc
+            # dist.mode = self.action_scale * torch.tanh(mean) + self.action_loc
+            dist.mode = self.action_scale * scaled_mean + self.action_loc
             dist._entropy = entropy
             dist.scale = std
         elif self.dist == "onehot":

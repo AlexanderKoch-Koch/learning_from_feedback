@@ -35,10 +35,12 @@ def compute_dreamer_loss(policy,
         """
     # model.train()
     # if not hasattr(policy, 'jit_loss_function'):
-    #     policy.jit_loss_function = torch.jit.trace(model, (obs, action, reward, valid, done), strict=False)
+    #     policy.jit_loss_function = torch.jit.trace(model.forward, (obs, action, reward, valid, done))#, strict=False)
     with policy.model_observe_timer:
         loss, info_dict = model.loss(obs, action, reward, valid, done)
         # loss, info_dict = policy.jit_loss_function(obs, action, reward, valid, done)
+        # loss = policy.jit_loss_function(obs, action, reward, valid, done)
+        # info_dict = dict()
     if log:
         weight_magnitudes = torch.stack([p.abs().mean() for p in model.parameters()])
         info_dict['mean_abs_weight'] = weight_magnitudes.mean()
@@ -104,6 +106,8 @@ def build_dreamer_model(policy, obs_space, action_space, config):
 def dreamer_optimizer_fn(policy, config):
     optim = torch.optim.Adam([
         dict(params=policy.model.parameters()),
+        # dict(params=policy.model.get_model_weights()),
+        # dict(params=policy.model.action_model.parameters(), lr=5e-5)
     ], lr=policy.config['td_model_lr'])
     return optim
 

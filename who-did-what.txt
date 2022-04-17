@@ -1,0 +1,7 @@
+Alex:
+proposed and implemented sequence guessing environment
+proposed and implemented simple single step dreamer algorithm to solve sequence guessing environment with sparse rewards
+
+proposed and implemented open loop dreamer to parallelize model-based RL which can learn from feedback
+
+proposed simple 2D robotic picking task with feedback
