@@ -37,6 +37,7 @@ DEFAULT_CONFIG = with_common_config({
     # Training iterations per data collection from real env
     "dreamer_train_iters": 100,
     "training_steps_per_env_step": 0.2,
+    "buffer_size": 1000, # maximum number of recent episodes saved for sampling
     # Horizon for Enviornment (1000 for Mujoco/DMC)
     "horizon": 1000,
     # Number of episodes to sample for Loss Calculation
@@ -148,6 +149,7 @@ def execution_plan(workers, config):
                                    length=config['batch_length'],
                                    memory_length=config['dreamer_model']['memory_length'],
                                    prefill_timesteps=config['prefill_timesteps'],
+                                   max_length=config['buffer_size'],
                                    training_steps_per_env_steps=config['training_steps_per_env_step'])
     # This sub-flow sends experiences to the learner.
     enqueue_op = train_batches.for_each(episode_buffer)

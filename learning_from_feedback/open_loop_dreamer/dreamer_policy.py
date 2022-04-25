@@ -104,11 +104,16 @@ def build_dreamer_model(policy, obs_space, action_space, config):
 
 
 def dreamer_optimizer_fn(policy, config):
+    # optim = torch.optim.Adam([
+    #     dict(params=policy.model.parameters()),
+    #     # dict(params=policy.model.get_model_weights()),
+    #     # dict(params=policy.model.action_model.parameters(), lr=5e-5)
+    # ], lr=policy.config['td_model_lr'])
+
     optim = torch.optim.Adam([
-        dict(params=policy.model.parameters()),
-        # dict(params=policy.model.get_model_weights()),
-        # dict(params=policy.model.action_model.parameters(), lr=5e-5)
-    ], lr=policy.config['td_model_lr'])
+        dict(params=policy.model.get_actor_weights(), lr=policy.config['actor_lr']),
+        dict(params=policy.model.get_model_weights(), lr=policy.config['td_model_lr']),
+    ])
     return optim
 
 
@@ -123,7 +128,7 @@ def action_sampler_fn(policy, model, input_dict, state, explore, timestep):
 
     # Weird RLLib Handling, this happens when env rests
     if len(state) == 0 or len(state[0].shape) != model.get_state_dims():
-        print('ressetting state')
+        # print('ressetting state')
         # Very hacky, but works on all envs
         state = model.get_initial_state(batch_size=obs.shape[0], sequence_length=policy.config['batch_length'])
 
@@ -131,6 +136,7 @@ def action_sampler_fn(policy, model, input_dict, state, explore, timestep):
 
     policy.global_timestep += policy.config["action_repeat"]
     policy.steps_sampled += policy.config['action_repeat']
+    # print(f'steps sampled: {policy.steps_sampled}')
 
     return action, logp, state
 

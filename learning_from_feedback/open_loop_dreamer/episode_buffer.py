@@ -35,6 +35,8 @@ class EpisodeBuffer(object):
         self.batch_size = batch_size
         self.prefill_timesteps = prefill_timesteps
         self.training_steps_per_env_steps = training_steps_per_env_steps
+        self.env_steps_per_training_step = 1 / self.training_steps_per_env_steps
+        self.num_sampled_steps_since_last_training = 0
         self.memory_length = memory_length or 1
 
     def __call__(self, samples):
@@ -44,13 +46,17 @@ class EpisodeBuffer(object):
         :return: samples
         """
         num_new_episodes = self.add(samples)
-        print(f'sampled {len(self.episodes)} episodes and {samples.count} steps; num new {num_new_episodes}')
+        # print(f'sampled {len(self.episodes)} episodes and {samples.count} steps; num new {num_new_episodes}')
         if self.timesteps >= self.prefill_timesteps:
             while not self.learner_inqueue.qsize() < 10:  # 1 * self.train_iters:
                 time.sleep(0.1)
-            print(f'training for {int(samples.count * self.training_steps_per_env_steps)}')
-            for _ in range(int(samples.count * self.training_steps_per_env_steps)):
+            self.num_sampled_steps_since_last_training += samples.count
+            # print(f'buffer size {self.max_length}')
+            # print(f'training for {self.num_sampled_steps_since_last_training / self.env_steps_per_training_step}')
+            while self.num_sampled_steps_since_last_training > self.env_steps_per_training_step:
+                # for _ in range(int(samples.count * self.training_steps_per_env_steps)):
                 self.learner_inqueue.put(self.sample(self.batch_size))
+                self.num_sampled_steps_since_last_training -= self.env_steps_per_training_step
 
         return samples
 
@@ -123,30 +129,33 @@ class EpisodeBuffer(object):
             episode = self.episodes[rand_index]
             # if episode.count < self.length:
             #     continue
-            available = episode.count - self.length
-            assert available >= 0, f"episode length is just {episode.count} but training batch length is set to {self.length}"
-            index = np.random.randint(-self.memory_length + 1, available + 1)
-            # index = np.random.randint(0, available + 1)
-            valid_steps = episode[max(0, index):index + self.length]
-            batch_obs = np.concatenate((np.zeros((max(0, -index), *valid_steps['obs'].shape[1:])), valid_steps['obs']),
-                                       axis=0)
-            batch_action = np.concatenate(
-                (np.zeros((max(0, -index), *valid_steps['actions'].shape[1:])), valid_steps['actions']), axis=0)
-            batch_rew = np.concatenate(
-                (np.zeros((max(0, -index), *valid_steps['rewards'].shape[1:])), valid_steps['rewards']), axis=0)
-            valid = np.ones_like(batch_rew)
-            done = np.zeros_like(batch_rew)
-            if index < 0:
-                valid[:-index] = 0
-            done[-1] = (episode.count == index + self.length)
-            episode = SampleBatch({
-                SampleBatch.OBS: batch_obs,
-                SampleBatch.REWARDS: batch_rew,
-                SampleBatch.ACTIONS: batch_action,
-                SampleBatch.DONES: done,
-                'valid': valid
-            })
-            episodes_buffer.append(episode)
+            if episode.count == self.length:
+                episodes_buffer.append(episode)
+            else:
+                available = episode.count - self.length
+                assert available >= 0, f"episode length is just {episode.count} but training batch length is set to {self.length}"
+                index = np.random.randint(-self.memory_length + 1, available + 1)
+                # index = np.random.randint(0, available + 1)
+                valid_steps = episode[max(0, index):index + self.length]
+                batch_obs = np.concatenate((np.zeros((max(0, -index), *valid_steps['obs'].shape[1:])), valid_steps['obs']),
+                                           axis=0)
+                batch_action = np.concatenate(
+                    (np.zeros((max(0, -index), *valid_steps['actions'].shape[1:])), valid_steps['actions']), axis=0)
+                batch_rew = np.concatenate(
+                    (np.zeros((max(0, -index), *valid_steps['rewards'].shape[1:])), valid_steps['rewards']), axis=0)
+                valid = np.ones_like(batch_rew)
+                done = np.zeros_like(batch_rew)
+                if index < 0:
+                    valid[:-index] = 0
+                done[-1] = (episode.count == index + self.length)
+                episode = SampleBatch({
+                    SampleBatch.OBS: batch_obs,
+                    SampleBatch.REWARDS: batch_rew,
+                    SampleBatch.ACTIONS: batch_action,
+                    SampleBatch.DONES: done,
+                    'valid': valid
+                })
+                episodes_buffer.append(episode)
 
         batch = {}
         for k in episodes_buffer[0].keys():
