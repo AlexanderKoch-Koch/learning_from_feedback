@@ -22,6 +22,7 @@ class Mlp(nn.Module):
         x = nn.functional.elu(self.encoding_layer(x))
         for hidden_layer in self.hidden_layers:
             x =  x + nn.functional.elu(hidden_layer(x))
+            # x =  nn.functional.elu(hidden_layer(x))
 
         return self.output_layer(x)
 
@@ -52,7 +53,7 @@ class SingleStepDreamerModel(TorchModelV2, nn.Module):
         self.action_model.eval()
         if isinstance(self.action_space, gym.spaces.Box):
             action = torch.tanh(self.action_model(obs))
-            if explore:# and torch.rand(1) < 0.5:
+            if explore and torch.rand(1) < 0.5:
                 action = torch.rand(action.shape, device=self.device) * 2 - 1
         else:
             if explore:
@@ -112,7 +113,7 @@ class SingleStepDreamerModel(TorchModelV2, nn.Module):
             action_min=action.min(),
             action_max=action.max(),
         )
-        return model_loss + 1 * actor_loss, info
+        return model_loss + actor_loss, info
 
     def get_initial_state(self, batch_size=1, sequence_length=None):
         state = [

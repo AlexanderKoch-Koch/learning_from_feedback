@@ -5,8 +5,9 @@ from learning_from_feedback.envs.simple_feedback_reacher import SimpleFeedbackRe
 from learning_from_feedback.open_loop_dreamer.state_dreamer_model import StateDreamerModel
 
 tune.register_env('simple_feedback_reacher',
-                  lambda kwargs: SimpleFeedbackReacher(num_objects=32,
-                                                       visible_objects=16))
+                  lambda kwargs: SimpleFeedbackReacher(num_objects=4,
+                                                       max_steps_per_episode=2,
+                                                       visible_objects=4))
 
 
 config = dict(
@@ -14,15 +15,17 @@ config = dict(
     framework='torch',
     num_workers=2,
     num_gpus=1,
-    prefill_timesteps=2000,
+    prefill_timesteps=5000,
+    buffer_size=int(1e6),
     dreamer_train_iters=100,
-    training_steps_per_env_step=1,
-    batch_size=128,
-    batch_length=2,
+    training_steps_per_env_step=.1,
+    batch_size=512,
+    batch_length=3,
     explore_noise=0.3,
-    td_model_lr=3e-4,
-    min_iter_time_s=5,
-    grad_clip=1000,
+    td_model_lr=1e-4,
+    actor_lr=1e-4,
+    # min_iter_time_s=5,
+    grad_clip=100,
     evaluation_interval=1,
     evaluation_num_episodes=100,
     evaluation_config=dict(
@@ -30,16 +33,16 @@ config = dict(
     ),
     dreamer_model=dict(
         custom_model=StateDreamerModel,
-        hidden_size=512,
-        stoch_size=64,
+        hidden_size=1024,
+        stoch_size=256,
         deter_size=512,
         discount=0.99,
-        horizon=1,
+        horizon=2,
 ),
 )
 train(OpenLoopDreamerTrainer,
       config,
-      default_logdir='logs/state_dreamer', # directory where to save training progress and checkpoints
+      default_logdir='~/training_logs/learning_from_feedback/state_dreamer', # directory where to save training progress and checkpoints
       debug=False, # runs in single thread when debug=True
       max_iterations=10000,
       num_samples=1, # number of training runs with different random seeds

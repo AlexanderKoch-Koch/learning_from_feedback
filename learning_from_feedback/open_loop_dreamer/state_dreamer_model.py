@@ -40,7 +40,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         self.state_size = state_size = deter_size + stoch_size
         hidden_size = model_config['hidden_size']
         self.transformer_dim = transformer_dim = 128
-        self.post_model = StochMlpModel(obs_space.shape[0], [hidden_size, ] * 1, stoch_size)
+        self.post_model = StochMlpModel(obs_space.shape[0], [hidden_size, ] * 2, stoch_size)
         # self.post_model = StochMlpModel(obs_space.shape[0] + deter_size, [hidden_size,] * 2, stoch_size)
         # self.decoder = StochMlpModel(state_size, 2 * [hidden_size, ],
         #                              output_size=obs_space.shape[0], squeeze=False, fixed_std=1)
@@ -64,7 +64,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
 
         self.cell = GRUCell(hidden_size, hidden_size=deter_size)
         self.gru = torch.nn.GRU(hidden_size, deter_size)
-        self.img1 = MlpModel(stoch_size + action_size, [hidden_size])
+        self.img1 = MlpModel(stoch_size + action_size, 1 * [hidden_size],)
 
     def policy(self,
                obs: TensorType,
@@ -107,6 +107,8 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         prior_dists = self.prior_model(gru_states[1:])
         target_dist = td.Normal(post_dists.mean[1:], post_dists.stddev[1:])
         kl_loss = self.kl_loss(prior_dists, target_dist).mean()
+        # kl_loss = 0.2 * td.kl_divergence(target_dist, prior_dists).sum(dim=-1).clamp(min=2).mean()
+        # kl_loss = torch.mean(((td.kl_divergence(target_dist, prior_dists).sum(dim=-1) - 1).clamp(min=0).detach() ** 2) * td.kl_divergence(target_dist, prior_dists).sum(dim=-1))
         mean_kl_div = td.kl_divergence(target_dist, prior_dists).sum(dim=-1).mean()
         states = torch.cat((stoch_states, gru_states), dim=-1)
 
@@ -115,9 +117,9 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         obs_loss = ((obs_reconstruction - observations)[:, :, :] ** 2).mean()
         # reward_pred = self.reward_model(states)
         # reward_pred = self.reward_model(obs_reconstruction.mean.detach())
-        reward_model_input = torch.cat((obs_reconstruction.detach(), actions), dim=-1)
-        reward_model_input = self.positional_encoding(pad(reward_model_input, self.transformer_dim))
-        # reward_model_input = self.positional_encoding(pad(torch.cat((observations, actions), dim=-1), self.transformer_dim))
+        # reward_model_input = torch.cat((obs_reconstruction.detach(), actions), dim=-1)
+        # reward_model_input = self.positional_encoding(pad(reward_model_input, self.transformer_dim))
+        reward_model_input = self.positional_encoding(pad(torch.cat((observations, actions), dim=-1), self.transformer_dim))
         model_reward_pred = self.reward_model(reward_model_input, mask=self.mask[:T, :T])[:, :, 0]
         # reward_loss = -torch.mean(valid * reward_pred.log_prob(rewards))
         # reward_loss = -torch.mean(reward_pred.log_prob(rewards))
@@ -126,8 +128,10 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         termination_loss = -torch.mean(valid * termination_pred.log_prob(done))
         model_loss = 1 * kl_loss + 1 * obs_loss + reward_loss + termination_loss
 
-        stoch_state = stoch_states[:-1].reshape(-1, self.stoch_size)
-        gru_state = gru_states[:-1].reshape(-1, self.deter_size)
+        # stoch_state = stoch_states[:-1].reshape(-1, self.stoch_size)
+        # gru_state = gru_states[:-1].reshape(-1, self.deter_size)
+        stoch_state = stoch_states[:1].reshape(-1, self.stoch_size)
+        gru_state = gru_states[:1].reshape(-1, self.deter_size)
         # samples_indexes = torch.randint(low=0, high=stoch_state.shape[0], size=(B,))
         # gru_state = gru_state[samples_indexes]
         # stoch_state = stoch_state[samples_indexes]
@@ -137,8 +141,8 @@ class StateDreamerModel(nn.Module, TorchModelV2):
             # reward_model_input = self.positional_encoding(pad(
                 # torch.cat((obs_reconstruction.mean[:-1].detach(), obs_pred), dim=0), 32))
                 # torch.cat((obs_reconstruction[:-1].detach(), obs_pred), dim=0), 32))
-            actions = torch.cat((actions[:-1], new_actions), dim=0)
-            obs = torch.cat((obs_reconstruction.detach()[:-1], obs_pred), dim=0)
+            actions = torch.cat((actions[:1], new_actions), dim=0)
+            obs = torch.cat((obs_reconstruction.detach()[:1], obs_pred), dim=0)
             reward_model_input = torch.cat((obs, actions), dim=-1)
             reward_model_input = self.positional_encoding(pad(reward_model_input, self.transformer_dim))
             reward_pred = self.reward_model(reward_model_input, mask=self.mask[:T, :T])[1:, :, 0]
@@ -147,10 +151,8 @@ class StateDreamerModel(nn.Module, TorchModelV2):
             termination_pred = self.termination_pred_model(imagined_states).mean
         termination_pred = torch.cat((torch.zeros_like(termination_pred[0:1]), termination_pred)[:-1], dim=0)
         discount = torch.cumprod(1 - termination_pred, dim=0)
-        # policy_loss = -torch.mean(discount.detach() * reward_pred) + 1 * ((actions.abs() - 0.80).clamp(min=0) ** 2).mean()
-        policy_loss = -torch.mean(discount.detach() * reward_pred) + 0.1 * (actions ** 2).mean()
-        # policy_loss = ((actions.abs() - 0.9).clamp(min=0) ** 2).mean()
-        # policy_loss = -torch.mean(reward_pred)
+        policy_loss = -torch.mean(discount.detach() * reward_pred) + 4 * ((actions.abs() - 0.5).clamp(min=0) ** 2).mean()
+        # policy_loss = -torch.mean(discount.detach() * reward_pred) + 0.1 * (actions ** 2).mean()
 
         info = dict(
             reward_loss=reward_loss,
@@ -221,16 +223,16 @@ class StateDreamerModel(nn.Module, TorchModelV2):
                + list(self.reward_model.parameters())
 
     def get_actor_weights(self):
-        return list(self.first_layer.action_model.parameters())
+        return list(self.action_model.parameters())
 
     def kl_loss(self, prior_dist, post_dist):
         post_dist_detached = td.Normal(post_dist.mean.detach(), post_dist.stddev.detach())
         prior_dist_detached = td.Normal(prior_dist.mean.detach(), prior_dist.stddev.detach())
 
-        prior_kl = td.kl_divergence(post_dist_detached, prior_dist).sum(dim=-1)
-        post_kl = td.kl_divergence(post_dist, prior_dist_detached).sum(dim=-1)
+        prior_kl = td.kl_divergence(post_dist_detached, prior_dist).mean(dim=-1)
+        post_kl = td.kl_divergence(post_dist, prior_dist_detached).mean(dim=-1)
         # kl_loss = 1 * prior_kl + 0.2 * post_kl
-        kl_loss = 1 * prior_kl + 0.1 * post_kl
+        kl_loss = 1 * prior_kl + 0.2 * post_kl
 
         # div = torch.mean(torch.distributions.kl_divergence(target_dist, prior_dist).sum(dim=-1))
         # kl_loss = torch.clamp(div.mean(), min=1.5)

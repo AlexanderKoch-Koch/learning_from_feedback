@@ -33,6 +33,7 @@ class SimpleFeedbackReacher(gym.Env):
             int(np.sqrt(self.visible_objects)), int(np.sqrt(self.visible_objects)))
         # self.correct_action = np.random.randint(0, self.visible_objects)
         self.correct_action = np.random.randint(0, np.sqrt(self.visible_objects), size=2)
+        self.all_past_actions_correct = True
 
         # self.current_task = np.random.choice(self.available_objects, 1)[0]
         return self._get_obs()
@@ -40,46 +41,35 @@ class SimpleFeedbackReacher(gym.Env):
     def step(self, action):
         self.step_in_episode += 1
         done = self.step_in_episode >= self.max_steps_per_episode
-        # action *= 2
-        # print(action)
-        # action = np.clip(action, a_min=-0.999, a_max=0.999)
-        # selected_object = -1 + np.ceil((np.sqrt(self.num_objects) /2) * (action[0] + 1)) * \
-        # np.ceil((np.sqrt(self.num_objects) / 2) * (action[1] + 1))
-        # map from [-1, 1] range to objects. actions outside this range lead to 0 reward.
-        # selected_object = np.floor((action[0] + 1) * 0.5 * self.num_objects)
-        # selected_position = int(np.floor((action[0] + 1) * 0.5 * self.visible_objects))
         if -1 <= action[0] <= 1 and -1 <= action[1] <= 1:
-            # selected_position = int(np.floor((action[0] + 1) * 0.5 * np.sqrt(self.visible_objects))) \
-            #                 + int(np.floor((action[1] + 1) * 0.5 * (self.visible_objects - 1)))
             selected_position = [int(np.floor((action[0] + 1) * 0.5 * np.sqrt(self.visible_objects))),
                                  int(np.floor((action[1] + 1) * 0.5 * np.sqrt(self.visible_objects)))]
-            # selected_position = int(np.floor((action[0] + 1) * 0.5 * self.visible_objects))
-            # if selected_position in range(0, self.visible_objects):
-            # selected_object = self.available_objects[selected_position]
-            # print(f'selected_position {selected_position} task {self.correct_action}')
-            # reward = selected_object == self.current_task
-            # reward = selected_position == self.correct_action
-            reward = (self.correct_action == np.array(selected_position)).all()
+            if not (self.correct_action == np.array(selected_position)).all():
+                self.all_past_actions_correct = False
+                reward = 0
+            else:
+                reward = 1
 
         else:
-            reward = 0
+            self.all_past_actions_correct = False
             selected_position = [-1, -1]
-        # print(f'reward: {reward}')
-        # print(f'current task {self.current_task}, selected object {selected_object}, action: {action}')
+            reward = 0
         info = dict()
-        # if action[0] < -0.95 or action[0] > 0.95:
-        #     reward = 0
-        # else:
-        #     reward = 1
-        # reward += -((np.abs(action[0]) - 0.95).clip(min=0) ** 2)
-        # reward = - (action[0] ** 2)
+        if done:
+            reward = self.all_past_actions_correct
+        else:
+            reward = 0
 
-        # self.current_task = np.random.randint(0, self.num_objects)
-        return self._get_obs(reward=reward, prev_action=selected_position), reward, done, info
+        # sample new task
+        last_correct_action = self.correct_action
+        self.correct_action = np.random.randint(0, np.sqrt(self.visible_objects), size=2)
 
-    def _get_obs(self, reward=0, prev_action=None):
-        if self.step_in_episode == 1:  # and reward < 1:
-            feedback_obs = self.correct_action
+        return self._get_obs(reward=reward, prev_action=selected_position, last_correct_action=last_correct_action), reward, done, info
+
+    def _get_obs(self, reward=0, prev_action=None, last_correct_action=None):
+        if self.step_in_episode >= 1:  # and reward < 1:
+            # feedback_obs = self.correct_action
+            feedback_obs = last_correct_action
         else:
             feedback_obs = [-1, -1]
 
@@ -94,16 +84,13 @@ class SimpleFeedbackReacher(gym.Env):
             # self.correct_action,
             np.array(feedback_obs),
             np.array(prev_action),
-            # self.available_objects.flatten(),
-            # np.array([reward]),
-            # [self.current_task],
         ])
 
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    env = SimpleFeedbackReacher(num_objects=16, visible_objects=16)
+    env = SimpleFeedbackReacher(num_objects=16, visible_objects=9, max_steps_per_episode=2)
     returns = []
     while True:
         done = False
