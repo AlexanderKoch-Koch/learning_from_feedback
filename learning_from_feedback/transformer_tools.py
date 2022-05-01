@@ -10,11 +10,11 @@ def generate_mask(size: int, device):
     return mask
 
 
-def pad(tensor, desired_size):
+def pad(tensor, desired_size, dim=-1):
     # returns tensor with zero padding in last dimension so that shape[-1] == desired_size
     padding_shape = list(tensor.shape)
-    padding_shape[-1] = desired_size - tensor.shape[-1]
-    return torch.cat((tensor, torch.zeros(padding_shape, device=tensor.device)), dim=-1)
+    padding_shape[dim] = desired_size - tensor.shape[dim]
+    return torch.cat((tensor, torch.zeros(padding_shape, device=tensor.device)), dim=dim)
 
 class PositionalEncoding(torch.nn.Module):
     def __init__(self, d_model, max_len=300):

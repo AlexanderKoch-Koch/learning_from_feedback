@@ -7,7 +7,13 @@ import numpy as np
 from ray.rllib.utils.typing import SampleBatchType
 from ray.rllib.policy.sample_batch import SampleBatch
 import time
+from learning_from_feedback.transformer_tools import pad
 
+def pad(tensor, desired_size, dim=-1):
+    # returns tensor with zero padding in last dimension so that shape[-1] == desired_size
+    padding_shape = list(tensor.shape)
+    padding_shape[dim] = desired_size - tensor.shape[dim]
+    return np.concatenate((tensor, np.zeros(padding_shape)), axis=dim)
 
 class EpisodeBuffer(object):
     def __init__(self, learner_inqueue,
@@ -130,7 +136,19 @@ class EpisodeBuffer(object):
             # if episode.count < self.length:
             #     continue
             if episode.count == self.length:
+                if 'eps_id' in episode.keys():
+                    episode.pop('eps_id') # not needed
                 episodes_buffer.append(episode)
+            elif episode.count < self.length:
+                episode = SampleBatch({
+                    SampleBatch.OBS: pad(episode[SampleBatch.OBS], self.length, dim=0),
+                    SampleBatch.REWARDS: pad(episode[SampleBatch.REWARDS], self.length, dim=0),
+                    SampleBatch.ACTIONS: pad(episode[SampleBatch.ACTIONS], self.length, dim=0),
+                    SampleBatch.DONES: pad(episode[SampleBatch.DONES], self.length, dim=0),
+                    'valid': np.concatenate((np.ones(episode.count), np.zeros(self.length - episode.count)))
+                })
+                episodes_buffer.append(episode)
+
             else:
                 available = episode.count - self.length
                 assert available >= 0, f"episode length is just {episode.count} but training batch length is set to {self.length}"

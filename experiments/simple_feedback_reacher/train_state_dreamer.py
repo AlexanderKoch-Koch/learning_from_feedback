@@ -6,7 +6,9 @@ from learning_from_feedback.open_loop_dreamer.state_dreamer_model import StateDr
 
 tune.register_env('simple_feedback_reacher',
                   lambda kwargs: SimpleFeedbackReacher(num_objects=4,
+                                                       num_tasks=16,
                                                        max_steps_per_episode=2,
+                                                       random_seed=0,
                                                        visible_objects=4))
 
 
@@ -47,5 +49,5 @@ train(OpenLoopDreamerTrainer,
       max_iterations=10000,
       num_samples=1, # number of training runs with different random seeds
       default_checkpoint_freq=50, # save network weights every x iterations
-      # restore="/home/alex/learning_from_feedback/experiments/simple_feedback_reacher/logs/state_dreamer/TransformerDreamer_2022-04-16_20-12-17/TransformerDreamer_simple_feedback_reacher_c035e_00000_0_2022-04-16_20-12-17/checkpoint_000400/checkpoint-400"
+      # restore="/home/alex/training_logs/learning_from_feedback/state_dreamer/TransformerDreamer_2022-05-01_09-25-18/TransformerDreamer_simple_feedback_reacher_da4a9_00000_0_2022-05-01_09-25-18/checkpoint_000050/checkpoint-50"
 )

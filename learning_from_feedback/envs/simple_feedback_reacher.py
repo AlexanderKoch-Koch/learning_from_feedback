@@ -5,16 +5,22 @@ import time
 
 class SimpleFeedbackReacher(gym.Env):
     def __init__(self, max_steps_per_episode=1, random_seed=0, num_objects=4, visible_objects=4,
-                 task_instruction_size=4, object_code_length=4):
+                 task_instruction_size=4, object_code_length=4, num_tasks=4):
         assert np.sqrt(
             visible_objects).is_integer(), "sqrt(num_tasks) has to be an integer since targets are positioned in square"
         rng = np.random.default_rng(random_seed)
         self.num_objects = num_objects
+        self.num_tasks = num_tasks
         self.visible_objects = visible_objects
-        self.task_instructions = rng.standard_normal((num_objects, task_instruction_size))
+        # self.task_instructions = rng.standard_normal((num_objects, task_instruction_size))
+        self.task_instructions = rng.standard_normal((num_tasks, task_instruction_size))
+        self.task_object_sequence = rng.integers(0, self.visible_objects, size=(num_tasks, max_steps_per_episode))
+        self.task_lengths = rng.integers(1, max_steps_per_episode + 1, size=(num_tasks,))
+
         self.object_codes = rng.standard_normal((num_objects, object_code_length))
         self.max_steps_per_episode = max_steps_per_episode
         self.step_in_episode = 0
+        self.current_episode_length = 1
         self.correct_action = np.zeros(2, dtype=np.long)
         self.available_objects = np.zeros((int(np.sqrt(self.visible_objects)), int(np.sqrt(self.visible_objects))),
                                           dtype=np.long)
@@ -26,12 +32,16 @@ class SimpleFeedbackReacher(gym.Env):
 
     def reset(self):
         self.step_in_episode = 0
-        self.available_objects = np.random.choice(self.num_objects, size=self.visible_objects, replace=False)
+        self.current_episode_length = np.random.randint(1, self.max_steps_per_episode + 1)
+        # self.available_objects = np.random.choice(self.num_objects, size=self.visible_objects, replace=False)
+        self.available_objects = np.random.choice(self.visible_objects, size=self.visible_objects, replace=False)
         # self.available_objects = np.arange(self.num_objects)
         # self.available_objects = np.random.permutation(self.available_objects)
         self.available_objects = self.available_objects.reshape(
             int(np.sqrt(self.visible_objects)), int(np.sqrt(self.visible_objects)))
         # self.correct_action = np.random.randint(0, self.visible_objects)
+
+        self.current_task = np.random.randint(0, self.num_tasks)
         self.correct_action = np.random.randint(0, np.sqrt(self.visible_objects), size=2)
         self.all_past_actions_correct = True
 
@@ -40,11 +50,15 @@ class SimpleFeedbackReacher(gym.Env):
 
     def step(self, action):
         self.step_in_episode += 1
-        done = self.step_in_episode >= self.max_steps_per_episode
+        # done = self.step_in_episode >= self.current_episode_length # self.max_steps_per_episode
+        done = self.step_in_episode >= self.task_lengths[self.current_task] # self.max_steps_per_episode
+        correct_object = self.task_object_sequence[self.current_task][self.step_in_episode - 1]
+        correct_position = np.unravel_index((self.available_objects == correct_object).argmax(), self.available_objects.shape)
         if -1 <= action[0] <= 1 and -1 <= action[1] <= 1:
-            selected_position = [int(np.floor((action[0] + 1) * 0.5 * np.sqrt(self.visible_objects))),
-                                 int(np.floor((action[1] + 1) * 0.5 * np.sqrt(self.visible_objects)))]
-            if not (self.correct_action == np.array(selected_position)).all():
+            selected_position = (int(np.floor((action[0] + 1) * 0.5 * np.sqrt(self.visible_objects))),
+                                 int(np.floor((action[1] + 1) * 0.5 * np.sqrt(self.visible_objects))))
+            # if not (self.correct_action == np.array(selected_position)).all():
+            if not selected_position == correct_position:
                 self.all_past_actions_correct = False
                 reward = 0
             else:
@@ -62,9 +76,9 @@ class SimpleFeedbackReacher(gym.Env):
 
         # sample new task
         last_correct_action = self.correct_action
-        self.correct_action = np.random.randint(0, np.sqrt(self.visible_objects), size=2)
+        # self.correct_action = np.random.randint(0, np.sqrt(self.visible_objects), size=2)
 
-        return self._get_obs(reward=reward, prev_action=selected_position, last_correct_action=last_correct_action), reward, done, info
+        return self._get_obs(reward=reward, prev_action=selected_position, last_correct_action=correct_position), reward, done, info
 
     def _get_obs(self, reward=0, prev_action=None, last_correct_action=None):
         if self.step_in_episode >= 1:  # and reward < 1:
@@ -77,8 +91,10 @@ class SimpleFeedbackReacher(gym.Env):
             prev_action = np.zeros_like(self.action_space.sample())
 
         return np.concatenate([
-            [self.step_in_episode / self.max_steps_per_episode],
-            np.array(self.task_instructions[self.available_objects[tuple(self.correct_action)]]),
+            # [self.step_in_episode / self.current_episode_length],
+            [self.step_in_episode / self.task_lengths[self.current_task]],
+            # np.array(self.task_instructions[self.available_objects[tuple(self.correct_action)]]),
+            np.array(self.task_instructions[self.current_task]),
             self.object_codes[self.available_objects.flatten()].flatten(),
             # self.available_objects.flatten()/4,
             # self.correct_action,
@@ -90,7 +106,7 @@ class SimpleFeedbackReacher(gym.Env):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    env = SimpleFeedbackReacher(num_objects=16, visible_objects=9, max_steps_per_episode=2)
+    env = SimpleFeedbackReacher(num_objects=16, visible_objects=4, max_steps_per_episode=2, num_tasks=16)
     returns = []
     while True:
         done = False

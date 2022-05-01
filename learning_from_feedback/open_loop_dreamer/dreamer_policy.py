@@ -46,7 +46,7 @@ def compute_dreamer_loss(policy,
         info_dict['mean_abs_weight'] = weight_magnitudes.mean()
         info_dict['max_abs_weight'] = weight_magnitudes.max()
         if hasattr(model, "logs"):
-            info_dict.update(model.logs(obs, action, reward))
+            info_dict.update(model.logs(obs, action, reward, valid))
     return loss, info_dict
 
 
