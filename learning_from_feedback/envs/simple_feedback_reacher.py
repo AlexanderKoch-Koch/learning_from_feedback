@@ -78,10 +78,12 @@ class SimpleFeedbackReacher(gym.Env):
         last_correct_action = self.correct_action
         # self.correct_action = np.random.randint(0, np.sqrt(self.visible_objects), size=2)
 
-        return self._get_obs(reward=reward, prev_action=selected_position, last_correct_action=correct_position), reward, done, info
+        return self._get_obs(reward=selected_position == correct_position,
+                             prev_action=selected_position,
+                             last_correct_action=correct_position), reward, done, info
 
     def _get_obs(self, reward=0, prev_action=None, last_correct_action=None):
-        if self.step_in_episode >= 1:  # and reward < 1:
+        if self.step_in_episode >= 1:# and reward < 1:
             # feedback_obs = self.correct_action
             feedback_obs = last_correct_action
         else:
@@ -106,7 +108,7 @@ class SimpleFeedbackReacher(gym.Env):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    env = SimpleFeedbackReacher(num_objects=16, visible_objects=4, max_steps_per_episode=2, num_tasks=16)
+    env = SimpleFeedbackReacher(num_objects=16, visible_objects=16, max_steps_per_episode=2, num_tasks=16)
     returns = []
     while True:
         done = False
@@ -120,7 +122,7 @@ if __name__ == '__main__':
 
             instruction = obs[1:5]
             correct_object = int((instruction == env.task_instructions).argmax(axis=0).mean())
-            available_objects = obs[5:9] * env.num_objects
+            available_objects = obs[5:9] * env.visible_objects
             target_pos_index = (correct_object == available_objects).argmax()
 
             # target_pos_index = correct_object

@@ -71,23 +71,31 @@ class LearnerThread(threading.Thread):
 
     def step(self):
         torch.backends.cudnn.benchmark = True
+        eval_fetches = None
         for i in range(self.dreamer_train_iters):
             with self.load_wait_timer:
-                batch = self.inqueue.get()
-            if i == self.dreamer_train_iters - 1:
+                (batch_type, batch) = self.inqueue.get()
+            if batch_type == 'test':
+                # if i == self.dreamer_train_iters - 1:
                 batch["log_gif"] = True
-            with self.grad_timer:
-                fetches = self.local_worker.learn_on_batch(batch)
-            self.weights_updated = True
-            self.learning_itr += 1
+                eval_fetches = self.local_worker.get_policy('default_policy').compute_gradients(batch)[1]
+                self.weights_updated = True
+                self.learning_itr += 1
+            else:
+                if i == self.dreamer_train_iters - 1:
+                    batch["log_gif"] = True
+                with self.grad_timer:
+                    fetches = self.local_worker.learn_on_batch(batch)
 
         print(f'trained for {self.learning_itr} training steps')
 
-        # Custom Logging
-        policy_fetches = self.policy_stats(fetches)
-        if "log_gif" in policy_fetches:
-            gif = policy_fetches["log_gif"]
-            fetches["log_gif"] = self.postprocess_gif(gif)
+        if eval_fetches is not None:
+            eval_learner_stats = eval_fetches['learner_stats']
+            fetches['default_policy']['learner_stats']['eval'] = eval_fetches['learner_stats']
+            # policy_fetches = self.policy_stats(fetches)
+            if "log_gif" in eval_learner_stats:
+                gif = eval_learner_stats["log_gif"]
+                fetches["log_gif"] = self.postprocess_gif(gif)
 
         # Metrics Calculation
         with self.queue_timer:

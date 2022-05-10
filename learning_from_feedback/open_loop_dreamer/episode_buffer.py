@@ -7,13 +7,16 @@ import numpy as np
 from ray.rllib.utils.typing import SampleBatchType
 from ray.rllib.policy.sample_batch import SampleBatch
 import time
+import random
 from learning_from_feedback.transformer_tools import pad
+
 
 def pad(tensor, desired_size, dim=-1):
     # returns tensor with zero padding in last dimension so that shape[-1] == desired_size
     padding_shape = list(tensor.shape)
     padding_shape[dim] = desired_size - tensor.shape[dim]
     return np.concatenate((tensor, np.zeros(padding_shape)), axis=dim)
+
 
 class EpisodeBuffer(object):
     def __init__(self, learner_inqueue,
@@ -33,6 +36,7 @@ class EpisodeBuffer(object):
         """
         # Stores all episodes into a list: List[SampleBatchType]
         self.episodes = []
+        self.test_episodes = []
         self.max_length = max_length
         self.max_episode_length = max_episode_length
         self.timesteps = 0
@@ -51,7 +55,11 @@ class EpisodeBuffer(object):
         :param samples:
         :return: samples
         """
-        num_new_episodes = self.add(samples)
+        if random.randint(0, 100) < 10:  # add about 10% of samples to eval dataset
+            self.add_test_episodes(samples)
+        else:
+            self.add(samples)
+
         # print(f'sampled {len(self.episodes)} episodes and {samples.count} steps; num new {num_new_episodes}')
         if self.timesteps >= self.prefill_timesteps:
             while not self.learner_inqueue.qsize() < 10:  # 1 * self.train_iters:
@@ -61,8 +69,11 @@ class EpisodeBuffer(object):
             # print(f'training for {self.num_sampled_steps_since_last_training / self.env_steps_per_training_step}')
             while self.num_sampled_steps_since_last_training > self.env_steps_per_training_step:
                 # for _ in range(int(samples.count * self.training_steps_per_env_steps)):
-                self.learner_inqueue.put(self.sample(self.batch_size))
+                self.learner_inqueue.put(('train', self.sample(self.episodes, self.batch_size)))
                 self.num_sampled_steps_since_last_training -= self.env_steps_per_training_step
+
+            if random.randint(0, 100) < 1:
+                self.learner_inqueue.put(('test', self.sample(self.test_episodes, self.batch_size)))
 
         return samples
 
@@ -82,6 +93,25 @@ class EpisodeBuffer(object):
             delta = len(self.episodes) - self.max_length
             # Drop oldest episodes
             self.episodes = self.episodes[delta:]
+
+        return len(episodes)
+
+    def add_test_episodes(self, batch: SampleBatchType):
+        """Splits a SampleBatch into episodes and adds episodes
+        to the episode buffer
+
+        Args:
+            batch: SampleBatch to be added
+        """
+        # self.timesteps += batch.count
+        episodes = batch.split_by_episode()
+
+        self.test_episodes.extend(episodes)
+        max_length = 2048
+        if len(self.test_episodes) > self.max_length:
+            delta = len(self.test_episodes) - max_length
+            # Drop oldest episodes
+            self.test_episodes = self.test_episodes[delta:]
 
         return len(episodes)
 
@@ -122,23 +152,21 @@ class EpisodeBuffer(object):
         }
         return SampleBatch(new_batch)
 
-    def sample(self, batch_size: int):
+    def sample(self, episode_buffer, batch_size: int):
         """Samples [batch_size, length] from the list of episodes
-
         Args:
+            episode_buffer: which buffer to sample from
             batch_size: batch_size to be sampled
         """
 
-        episodes_buffer = []
-        while len(episodes_buffer) < batch_size:
-            rand_index = np.random.randint(0, len(self.episodes))
-            episode = self.episodes[rand_index]
-            # if episode.count < self.length:
-            #     continue
+        sampled_episodes = []
+        while len(sampled_episodes) < batch_size:
+            rand_index = np.random.randint(0, len(episode_buffer))
+            episode = episode_buffer[rand_index]
             if episode.count == self.length:
                 if 'eps_id' in episode.keys():
-                    episode.pop('eps_id') # not needed
-                episodes_buffer.append(episode)
+                    episode.pop('eps_id')  # not needed
+                sampled_episodes.append(episode)
             elif episode.count < self.length:
                 episode = SampleBatch({
                     SampleBatch.OBS: pad(episode[SampleBatch.OBS], self.length, dim=0),
@@ -147,7 +175,7 @@ class EpisodeBuffer(object):
                     SampleBatch.DONES: pad(episode[SampleBatch.DONES], self.length, dim=0),
                     'valid': np.concatenate((np.ones(episode.count), np.zeros(self.length - episode.count)))
                 })
-                episodes_buffer.append(episode)
+                sampled_episodes.append(episode)
 
             else:
                 available = episode.count - self.length
@@ -155,8 +183,9 @@ class EpisodeBuffer(object):
                 index = np.random.randint(-self.memory_length + 1, available + 1)
                 # index = np.random.randint(0, available + 1)
                 valid_steps = episode[max(0, index):index + self.length]
-                batch_obs = np.concatenate((np.zeros((max(0, -index), *valid_steps['obs'].shape[1:])), valid_steps['obs']),
-                                           axis=0)
+                batch_obs = np.concatenate(
+                    (np.zeros((max(0, -index), *valid_steps['obs'].shape[1:])), valid_steps['obs']),
+                    axis=0)
                 batch_action = np.concatenate(
                     (np.zeros((max(0, -index), *valid_steps['actions'].shape[1:])), valid_steps['actions']), axis=0)
                 batch_rew = np.concatenate(
@@ -173,9 +202,9 @@ class EpisodeBuffer(object):
                     SampleBatch.DONES: done,
                     'valid': valid
                 })
-                episodes_buffer.append(episode)
+                sampled_episodes.append(episode)
 
         batch = {}
-        for k in episodes_buffer[0].keys():
-            batch[k] = np.stack([e[k] for e in episodes_buffer], axis=0)
+        for k in sampled_episodes[0].keys():
+            batch[k] = np.stack([e[k] for e in sampled_episodes], axis=0)
         return SampleBatch(batch)

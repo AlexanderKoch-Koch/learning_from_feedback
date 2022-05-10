@@ -149,7 +149,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
             # torch.cat((obs_reconstruction.mean[:-1].detach(), obs_pred), dim=0), 32))
             # obs = torch.cat((obs_reconstruction[:1].detach(), obs_pred), dim=0)
             policy_actions = torch.cat((actions[:1], new_actions), dim=0)
-            # obs_pred = torch.cat((observations[:1], obs_pred), dim=0)
+            # obs_pred = torch.cat((observations[:1], obs_pred[1:]), dim=0)
             reward_model_input = torch.cat((obs_pred, policy_actions), dim=-1)
             reward_model_input = self.positional_encoding(pad(reward_model_input, self.transformer_dim))
             reward_pred = self.reward_model(reward_model_input, mask=self.mask[:obs_pred.shape[0], :obs_pred.shape[0]])[1:, :, 0]
@@ -160,6 +160,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         discount = torch.cumprod(1 - termination_pred, dim=0)
         policy_loss = -torch.mean(discount.detach() * reward_pred) + 10 * (
                     (new_actions.abs() - 0.9).clamp(min=0) ** 2).mean()
+        # policy_loss = -torch.mean(discount.detach() * reward_pred) + (new_actions ** 2).mean()
         info = dict(
             reward_loss=reward_loss,
             # abs_action_value=torch.mean(torch.abs(self.action_model(torch.cat((stoch_state, gru_state), dim=-1)))),
