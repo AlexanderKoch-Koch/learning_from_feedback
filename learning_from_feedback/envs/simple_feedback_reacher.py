@@ -12,15 +12,16 @@ class SimpleFeedbackReacher(gym.Env):
         self.num_objects = num_objects
         self.num_tasks = num_tasks
         self.visible_objects = visible_objects
+        self.side_length = int(np.sqrt(visible_objects))
         # self.task_instructions = rng.standard_normal((num_objects, task_instruction_size))
         self.task_instructions = rng.standard_normal((num_tasks, task_instruction_size))
-        self.task_object_sequence = rng.integers(0, self.visible_objects, size=(num_tasks, max_steps_per_episode))
+        self.task_object_sequence = rng.integers(0, self.num_objects, size=(num_tasks, max_steps_per_episode))
         self.task_lengths = rng.integers(1, max_steps_per_episode + 1, size=(num_tasks,))
 
         self.object_codes = rng.standard_normal((num_objects, object_code_length))
         self.max_steps_per_episode = max_steps_per_episode
         self.step_in_episode = 0
-        self.current_episode_length = 1
+        # self.current_episode_length = 1
         self.correct_action = np.zeros(2, dtype=np.long)
         self.available_objects = np.zeros((int(np.sqrt(self.visible_objects)), int(np.sqrt(self.visible_objects))),
                                           dtype=np.long)
@@ -32,16 +33,22 @@ class SimpleFeedbackReacher(gym.Env):
 
     def reset(self):
         self.step_in_episode = 0
-        self.current_episode_length = np.random.randint(1, self.max_steps_per_episode + 1)
+        self.current_task = np.random.randint(0, self.num_tasks)
+        # self.current_episode_length = np.random.randint(1, self.max_steps_per_episode + 1)
         # self.available_objects = np.random.choice(self.num_objects, size=self.visible_objects, replace=False)
-        self.available_objects = np.random.choice(self.visible_objects, size=self.visible_objects, replace=False)
+        self.available_objects = np.random.choice(self.num_objects, size=self.visible_objects, replace=False)
+
+        replacement_indeces = np.random.choice(self.visible_objects, size=self.max_steps_per_episode)
+
+        for i, task_object in enumerate(self.task_object_sequence[self.current_task]):
+            if task_object not in self.available_objects:
+                self.available_objects[replacement_indeces[i]] = task_object
         # self.available_objects = np.arange(self.num_objects)
         # self.available_objects = np.random.permutation(self.available_objects)
         self.available_objects = self.available_objects.reshape(
             int(np.sqrt(self.visible_objects)), int(np.sqrt(self.visible_objects)))
         # self.correct_action = np.random.randint(0, self.visible_objects)
 
-        self.current_task = np.random.randint(0, self.num_tasks)
         self.correct_action = np.random.randint(0, np.sqrt(self.visible_objects), size=2)
         self.all_past_actions_correct = True
 
@@ -75,7 +82,7 @@ class SimpleFeedbackReacher(gym.Env):
             reward = 0
 
         # sample new task
-        last_correct_action = self.correct_action
+        # last_correct_action = self.correct_action
         # self.correct_action = np.random.randint(0, np.sqrt(self.visible_objects), size=2)
 
         return self._get_obs(reward=selected_position == correct_position,
@@ -83,32 +90,49 @@ class SimpleFeedbackReacher(gym.Env):
                              last_correct_action=correct_position), reward, done, info
 
     def _get_obs(self, reward=0, prev_action=None, last_correct_action=None):
+        assert np.array([self.current_task]).shape == (1,)
         if self.step_in_episode >= 1:# and reward < 1:
             # feedback_obs = self.correct_action
             feedback_obs = last_correct_action
         else:
-            feedback_obs = [-1, -1]
+            feedback_obs = [0, 0]
 
         if prev_action is None:
             prev_action = np.zeros_like(self.action_space.sample())
 
-        return np.concatenate([
-            # [self.step_in_episode / self.current_episode_length],
-            [self.step_in_episode / self.task_lengths[self.current_task]],
-            # np.array(self.task_instructions[self.available_objects[tuple(self.correct_action)]]),
-            np.array(self.task_instructions[self.current_task]),
-            self.object_codes[self.available_objects.flatten()].flatten(),
-            # self.available_objects.flatten()/4,
-            # self.correct_action,
-            np.array(feedback_obs),
-            np.array(prev_action),
-        ])
+        if self.step_in_episode == 0:
+            return np.concatenate([
+                # [self.step_in_episode / self.current_episode_length],
+                [self.step_in_episode / self.task_lengths[self.current_task]],
+                # np.array(self.task_instructions[self.available_objects[tuple(self.correct_action)]]),
+                np.array(self.task_instructions[self.current_task]),# * (self.step_in_episode == 0),
+                # np.array([self.current_task]),
+                self.object_codes[self.available_objects.flatten()].flatten(),# * (self.step_in_episode == 0),
+                # (np.array(feedback_obs) / self.side_length) - 0.5,
+                # (np.array(prev_action) / self.side_length) - 0.5,
+                np.array(feedback_obs),
+                np.array(prev_action),
+            ])
+        else:
+            return np.concatenate([
+                # [self.step_in_episode / self.current_episode_length],
+                [self.step_in_episode / self.task_lengths[self.current_task]],
+                # np.array(self.task_instructions[self.available_objects[tuple(self.correct_action)]]),
+                np.array(self.task_instructions[self.current_task])*0,# * (self.step_in_episode == 0),
+                # np.array([self.current_task]) * 0,
+                self.object_codes[self.available_objects.flatten()].flatten()*0,# * (self.step_in_episode == 0),
+                (np.array(feedback_obs) / self.side_length) - 0.5,
+                (np.array(prev_action) / self.side_length) - 0.5,
+                # np.array(feedback_obs)* 0,
+                # np.array(prev_action),
+                # (np.array(prev_action) / self.side_length) - 0.5,
+            ])
 
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    env = SimpleFeedbackReacher(num_objects=16, visible_objects=16, max_steps_per_episode=2, num_tasks=16)
+    env = SimpleFeedbackReacher(num_objects=16, visible_objects=4, max_steps_per_episode=1, num_tasks=16)
     returns = []
     while True:
         done = False
@@ -127,7 +151,7 @@ if __name__ == '__main__':
 
             # target_pos_index = correct_object
 
-            action = [(target_pos_index // 2) - 0.5, (target_pos_index % 2) - 0.5]
+            # action = [(target_pos_index // 2) - 0.5, (target_pos_index % 2) - 0.5]
 
             obs, reward, done, info = env.step(action)
 

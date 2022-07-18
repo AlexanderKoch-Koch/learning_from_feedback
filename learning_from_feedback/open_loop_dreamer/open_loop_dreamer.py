@@ -39,7 +39,7 @@ DEFAULT_CONFIG = with_common_config({
     "training_steps_per_env_step": 0.2,
     "buffer_size": 1000, # maximum number of recent episodes saved for sampling
     # Horizon for Enviornment (1000 for Mujoco/DMC)
-    "horizon": 1000,
+    "horizon": 200,
     # Number of episodes to sample for Loss Calculation
     "batch_size": 50,
     # Length of each episode to sample for Loss Calculation

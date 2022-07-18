@@ -72,8 +72,8 @@ class EpisodeBuffer(object):
                 self.learner_inqueue.put(('train', self.sample(self.episodes, self.batch_size)))
                 self.num_sampled_steps_since_last_training -= self.env_steps_per_training_step
 
-            if random.randint(0, 100) < 1:
-                self.learner_inqueue.put(('test', self.sample(self.test_episodes, self.batch_size)))
+                if random.randint(0, 100) < 1:
+                    self.learner_inqueue.put(('test', self.sample(self.test_episodes, self.batch_size)))
 
         return samples
 
@@ -182,14 +182,15 @@ class EpisodeBuffer(object):
                 assert available >= 0, f"episode length is just {episode.count} but training batch length is set to {self.length}"
                 index = np.random.randint(-self.memory_length + 1, available + 1)
                 # index = np.random.randint(0, available + 1)
-                valid_steps = episode[max(0, index):index + self.length]
-                batch_obs = np.concatenate(
-                    (np.zeros((max(0, -index), *valid_steps['obs'].shape[1:])), valid_steps['obs']),
-                    axis=0)
-                batch_action = np.concatenate(
-                    (np.zeros((max(0, -index), *valid_steps['actions'].shape[1:])), valid_steps['actions']), axis=0)
-                batch_rew = np.concatenate(
-                    (np.zeros((max(0, -index), *valid_steps['rewards'].shape[1:])), valid_steps['rewards']), axis=0)
+                valid_steps = episode[max(0, index):index + self.length] # simple episode slice
+                num_padding_steps = max(0, -index) # number of artificial steps to prepend to sample to support memory
+                padding_observations = np.zeros((num_padding_steps, *valid_steps['obs'].shape[1:]))
+                batch_obs = np.concatenate((padding_observations, valid_steps['obs']), axis=0)
+                padding_actions = np.zeros((num_padding_steps, *valid_steps['actions'].shape[1:]))
+                batch_action = np.concatenate((padding_actions, valid_steps['actions']), axis=0)
+                padding_rewards = np.zeros((num_padding_steps, *valid_steps['rewards'].shape[1:]))
+                batch_rew = np.concatenate((padding_rewards, valid_steps['rewards']), axis=0)
+
                 valid = np.ones_like(batch_rew)
                 done = np.zeros_like(batch_rew)
                 if index < 0:

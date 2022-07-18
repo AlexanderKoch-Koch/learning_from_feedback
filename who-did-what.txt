@@ -4,4 +4,4 @@ proposed and implemented simple single step dreamer algorithm to solve sequence 
 
 proposed and implemented open loop dreamer to parallelize model-based RL which can learn from feedback
 
-proposed simple 2D robotic picking task with feedback
+proposed and implemented simple 2D robotic picking task with feedback

@@ -6,10 +6,16 @@ based on https://github.com/ray-project/ray/blob/master/rllib/agents/dreamer/dre
 import logging
 import gym.spaces
 import learning_from_feedback
+import numpy as np
 from ray.rllib.policy.torch_policy_template import build_torch_policy
 from ray.rllib.utils.framework import try_import_torch
-from feedback_learning.transformer_dreamer.torch_policy import apply_grad_clipping, dreamer_stats, preprocess_episode
+from ray.rllib.utils.torch_ops import apply_grad_clipping
 from ray.rllib.utils.timer import TimerStat
+from ray.rllib.policy.sample_batch import SampleBatch
+from ray.rllib.evaluation import MultiAgentEpisode
+from ray.rllib.utils.typing import AgentID
+from ray.rllib.policy.policy import Policy
+from typing import Dict, Optional
 
 torch, nn = try_import_torch()
 logger = logging.getLogger(__name__)
@@ -117,6 +123,10 @@ def dreamer_optimizer_fn(policy, config):
     return optim
 
 
+def dreamer_stats(policy, train_batch):
+    return policy.stats_dict
+
+
 def action_sampler_fn(policy, model, input_dict, state, explore, timestep):
     """Action sampler function has two phases. During the prefill phase,
     actions are sampled uniformly [-1, 1]. During training phase, actions
@@ -124,7 +134,7 @@ def action_sampler_fn(policy, model, input_dict, state, explore, timestep):
     to incentivize exploration.
     """
     obs = input_dict["obs"]
-    logp = torch.tensor([0.0]) # necessary for RLLib for unknown reason
+    logp = torch.tensor([0.0])  # necessary for RLLib for unknown reason
 
     # Weird RLLib Handling, this happens when env rests
     if len(state) == 0 or len(state[0].shape) != model.get_state_dims():
@@ -139,6 +149,49 @@ def action_sampler_fn(policy, model, input_dict, state, explore, timestep):
     # print(f'steps sampled: {policy.steps_sampled}')
 
     return action, logp, state
+
+
+def preprocess_episode(
+        policy: Policy,
+        sample_batch: SampleBatch,
+        other_agent_batches: Optional[Dict[AgentID, SampleBatch]] = None,
+        episode: Optional[MultiAgentEpisode] = None) -> SampleBatch:
+    """Batch format should be in the form of (s_t, a_(t-1), r_(t-1))
+    When t=0, the resetted obs is paired with action and reward of 0.
+    """
+    obs = sample_batch[SampleBatch.OBS]
+    new_obs = sample_batch[SampleBatch.NEXT_OBS]
+    action = sample_batch[SampleBatch.ACTIONS]
+    reward = sample_batch[SampleBatch.REWARDS]
+    eps_ids = sample_batch[SampleBatch.EPS_ID]
+
+    act_shape = action.shape
+    # act_reset = np.array([0.0] * act_shape[-1])[None]
+    act_reset = np.zeros_like(action[0])[None]
+    rew_reset = np.array(0.0)[None]
+    obs_end = np.array(new_obs[act_shape[0] - 1])[None]
+
+    batch_obs = np.concatenate([obs, obs_end], axis=0)
+    batch_action = np.concatenate([act_reset, action], axis=0)
+    batch_rew = np.concatenate([rew_reset, reward], axis=0)
+    batch_eps_ids = np.concatenate([eps_ids, eps_ids[-1:]], axis=0)
+
+    # batch_obs = np.concatenate((np.zeros((policy.config['batch_length'] - 1, *batch_obs.shape[1:])), batch_obs), axis=0)
+    # batch_action = np.concatenate((np.zeros((policy.config['batch_length'] - 1, *batch_action.shape[1:])), batch_action), axis=0)
+    # batch_rew = np.concatenate((np.zeros((policy.config['batch_length'] - 1, *batch_rew.shape[1:])), batch_rew), axis=0)
+    valid = np.ones_like(batch_rew)
+    done = np.zeros_like(batch_rew)
+    done[-1] = 1
+
+    new_batch = {
+        SampleBatch.OBS: batch_obs,
+        SampleBatch.REWARDS: batch_rew,
+        SampleBatch.ACTIONS: batch_action,
+        SampleBatch.EPS_ID: batch_eps_ids,
+        SampleBatch.DONES: done,
+        'valid': valid
+    }
+    return SampleBatch(new_batch)
 
 
 OpenLoopDreamerTorchPolicy = build_torch_policy(

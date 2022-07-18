@@ -1,5 +1,5 @@
-from typing import List, Tuple
-
+g import List, Tuple
+import numpy as np
 import torch
 import torch.distributions as td
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
@@ -44,7 +44,8 @@ class StateDreamerModel(nn.Module, TorchModelV2):
 
         # self.decoder = StochMlpModel(state_size, 2 * [hidden_size, ],
         #                              output_size=obs_space.shape[0], squeeze=False, fixed_std=1)
-        self.decoder = MlpModel(state_size, 2 * [hidden_size, ], output_size=obs_space.shape[0])
+        self.obs_pred_model = MlpModel(2 * obs_space.shape[0] + 2 * action_size, [hidden_size, hidden_size], 2 * obs_space.shape[0])
+        self.decoder = MlpModel(state_size, 4 * [hidden_size, ], output_size=obs_space.shape[0], nonlinearity=torch.nn.ELU)
 
         self.device = (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
         # self.reward_model = StochMlpModel(state_size, [hidden_size,], 1, fixed_std=1)
@@ -77,19 +78,21 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         # stoch_state = posterior
         # state = torch.cat((stoch_state, gru_state), dim=-1)
 
-        gru_inputs = self.img1(torch.cat((stoch_state, prev_action), dim=-1))
-        gru_state = self.gru_cell(gru_inputs, gru_state)
-        post_dist = self.post_model(torch.cat((obs, gru_state * 0), dim=-1))
-        stoch_state = post_dist.rsample()
-        state = torch.cat((stoch_state, gru_state), dim=-1)
+        # gru_inputs = self.img1(torch.cat((stoch_state, prev_action), dim=-1))
+        # gru_state = self.gru_cell(gru_inputs, gru_state)
+        # post_dist = self.post_model(torch.cat((obs, gru_state * 0), dim=-1))
+        # stoch_state = post_dist.rsample()
+        # state = torch.cat((stoch_state, gru_state), dim=-1)
 
         if explore:
-            action = self.action_model(state)  # .rsample()
+            # action = torch.tanh(self.action_model(state))  # .rsample()
             # action = td.Normal(action, torch.zeros_like(action) + 0.3).sample().clamp(min=-1, max=1)
-            if torch.rand(1) > 0.5:
-                action = torch.rand(action.shape, device=self.device) * 2 - 1
+            # action = torch.tensor(np.random.choice([-0.5, 0, 0.5], size=action.shape))
+            # if torch.rand(1) > 0.5:
+            action = torch.rand(prev_action.shape, device=self.device) * 2 - 1
         else:
-            action = torch.tanh(self.action_model(state))
+            # action = torch.tanh(self.action_model(state))
+            action = torch.rand(prev_action.shape, device=self.device) * 2 - 1
             # action = self.action_model(state).mode
 
         # x = self.img1(torch.cat([stoch_state, action], dim=-1))
@@ -115,6 +118,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
 
             post_dist = self.post_model(torch.cat((observations[t], gru_state * 0), dim=-1))
             stoch_state = post_dist.rsample()
+            # stoch_state = post_dist.mean
             if t > 0:
                 kl_loss += (1 / T) * torch.mean(self.kl_loss(prior_dist, post_dist) * valid[t])
                 mean_kl_div += (1 / T) * (td.kl_divergence(prior_dist, post_dist).mean(dim=-1) * valid[t]).mean()
@@ -125,7 +129,10 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         stoch_states, gru_states = torch.stack(stoch_states), torch.stack(gru_states)
         states = torch.cat((stoch_states, gru_states), dim=-1)
 
+
         obs_reconstruction = self.decoder(states)
+        obs_input = torch.cat((observations[0:1], torch.zeros_like(observations[1:])), dim=0)
+        obs_reconstruction = self.obs_pred_model(torch.cat((obs_input, actions), dim=-1).permute(1, 0, 2).reshape(B, -1)).reshape(B, T, -1).permute(1, 0, 2)
         reward_model_input = torch.cat((obs_reconstruction.detach(), actions), dim=-1)
         reward_model_input = self.positional_encoding(pad(reward_model_input, self.transformer_dim))
         # reward_model_input = self.positional_encoding(
@@ -133,10 +140,11 @@ class StateDreamerModel(nn.Module, TorchModelV2):
         model_reward_pred = self.reward_model(reward_model_input, mask=self.mask[:T, :T])[:, :, 0]
         termination_pred = self.termination_pred_model(states)
 
-        obs_loss = (valid * ((obs_reconstruction - observations)[:, :, :] ** 2).mean(dim=-1)).mean()
+        # obs_loss = (((obs_reconstruction - observations)[0, :, :] ** 2).mean(dim=-1)).mean()
+        obs_loss = (valid[1:] * ((obs_reconstruction - observations)[1:, :, -4:-2] ** 2).mean(dim=-1)).mean()
         reward_loss = (valid * ((model_reward_pred - rewards) ** 2)).mean()
         termination_loss = -(valid * termination_pred.log_prob(done)).mean()
-        model_loss = 1 * kl_loss + 1 * obs_loss + reward_loss + termination_loss
+        model_loss = 0 * kl_loss + 1 * obs_loss + 1 * reward_loss + 0 * termination_loss
         print(f'reward Loss: {reward_loss} obs_loss {obs_loss}')
 
         with FreezeParameters(list(self.get_model_weights())):
@@ -173,7 +181,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
             mean_kl_div=mean_kl_div,
             mean_dreamed_reward=(discount * reward_pred).sum(dim=0).mean(),
         )
-        return model_loss + 1 * policy_loss, info
+        return model_loss + 0 * policy_loss, info
 
     def loss_no_loop(self, observations, actions, rewards, valid, done):
         """observations and actions in shape T x B x ..."""
@@ -299,6 +307,7 @@ class StateDreamerModel(nn.Module, TorchModelV2):
 
     def get_model_weights(self):
         return list(self.prior_model.parameters()) \
+             + list(self.obs_pred_model.parameters()) \
              + list(self.post_model.parameters()) \
              + list(self.decoder.parameters()) \
              + list(self.img1.parameters()) \
@@ -332,15 +341,20 @@ class StateDreamerModel(nn.Module, TorchModelV2):
 
         post_dist = self.post_model(torch.cat((obs[0], gru_state * 0), dim=-1))
         stoch_state = post_dist.rsample()
+        # stoch_state = post_dist.mean
         states = torch.cat((stoch_state, gru_state), dim=-1).unsqueeze(0)
         imagined_states, new_actions, action_stds = self.dream(stoch_state, gru_state, self.horizon,
                                                                actions=actions[1:])
         states = torch.cat((states, imagined_states), dim=0)
 
         obs_pred = self.decoder(states)
+        obs_input = torch.cat((obs[0:1], torch.zeros_like(obs[1:])), dim=0)
+        obs_pred = self.obs_pred_model(torch.cat((obs_input, actions), dim=-1).permute(1, 0, 2).reshape(B, -1)).reshape(B, T, -1).permute(1, 0, 2)
 
         reward_model_input = torch.cat((obs_pred, actions[:1 + self.horizon]), dim=-1)
         reward_model_input = self.positional_encoding(pad(reward_model_input, self.transformer_dim))
+        # reward_model_input = self.positional_encoding(
+        #     pad(torch.cat((obs, actions), dim=-1), self.transformer_dim))
         reward_pred = self.reward_model(reward_model_input, mask=self.mask[:T, :T])[:, :, 0]
 
         info = dict(
@@ -352,6 +366,9 @@ class StateDreamerModel(nn.Module, TorchModelV2):
             reward_reconstruction_abs_error=torch.mean((reward_pred[:1] - rewards[:1]).abs()),
             correct_reward_pred_proportion=(valid[1:] * (
                         reward_pred[1:1 + self.horizon] - rewards[1:1 + self.horizon]).abs() < 0.1).float().mean(),
+            feedback_pre_abs_error=torch.mean(
+                valid[1:, :, None] * (obs_pred[1:1 + self.horizon] - obs[1:1 + self.horizon])[:, :, -4:-2].abs()),
+            feedback_pred_correct=((obs_pred[1:1 + self.horizon] - obs[1:1 + self.horizon])[:, :, -4:-2].abs() < 0.05).float().mean(),
         )
         return info
 

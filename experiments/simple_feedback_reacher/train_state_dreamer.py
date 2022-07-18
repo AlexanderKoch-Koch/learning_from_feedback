@@ -6,25 +6,27 @@ from learning_from_feedback.open_loop_dreamer.state_dreamer_model import StateDr
 
 tune.register_env('simple_feedback_reacher',
                   lambda kwargs: SimpleFeedbackReacher(num_objects=16,
-                                                       num_tasks=16,
+                                                       num_tasks=2,
                                                        max_steps_per_episode=1,
                                                        random_seed=0,
-                                                       visible_objects=16))
+                                                       visible_objects=16,
+                                                       object_code_length=2))
 
 
 config = dict(
     env='simple_feedback_reacher',
     framework='torch',
-    num_workers=2,
+    num_workers=23,
+    # num_envs_per_worker=16,
     num_gpus=1,
-    prefill_timesteps=5000,
+    prefill_timesteps=40000,
     buffer_size=int(1e6),
     dreamer_train_iters=100,
-    training_steps_per_env_step=1,
+    training_steps_per_env_step=10.1,
     batch_size=1024,
     batch_length=2,
     explore_noise=0.3,
-    td_model_lr=3e-4,
+    td_model_lr=1e-4,
     actor_lr=3e-4,
     # min_iter_time_s=5,
     grad_clip=100,
