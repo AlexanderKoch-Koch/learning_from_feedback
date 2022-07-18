@@ -1,4 +1,9 @@
 # feedback_learning
+ Classical RL algorithms can only use rewards as information how to improve. This is often very inefficient.
+However, the environment often provides useful feedback on what has been done wrong.
+This can be, for example, explicit natural language feedback by a human.
+By using this complex feedback the training speed can be greatly improved.
+
 ## Learning to predict bit sequence with and without binary error feedback
 experiments/train_single_step_dreamer.py was used to run this experiment.
 The number of runs with different random seeds, the log directory and whether to use 
